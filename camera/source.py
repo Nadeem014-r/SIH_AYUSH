@@ -4,10 +4,10 @@ import re
 import socket
 import urllib.parse
 
-# Must be set BEFORE cv2 is imported so OpenCV's FFmpeg backend uses TCP/UDP and fast timeouts.
+# Must be set BEFORE cv2 is imported so OpenCV's FFmpeg backend uses TCP and reliable timeouts.
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "rtsp_transport;tcp;udp|timeout;3000000|stimeout;3000000|max_delay;500000",
+    "rtsp_transport;tcp|timeout;5000000|stimeout;5000000|max_delay;500000",
 )
 
 import cv2
@@ -68,16 +68,15 @@ class CameraSource:
                     port = parsed.port or (554 if "rtsp" in parsed.scheme.lower() else 80)
                     if host:
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.settimeout(0.6)
+                            s.settimeout(2.5)
                             if s.connect_ex((host, port)) != 0:
-                                raise RuntimeError(f"Network destination unreachable: {host}:{port}")
+                                log.debug("Preflight TCP probe to %s:%d failed or timed out", host, port)
                 except Exception as e:
-                    if isinstance(e, RuntimeError):
-                        raise
+                    log.debug("Preflight check exception: %s", e)
 
                 candidates = [src_str]
                 if src_str.endswith("/"):
-                    candidates.insert(0, src_str.rstrip("/"))
+                    candidates.append(src_str.rstrip("/"))
                     candidates.append(src_str.rstrip("/") + "/live")
                 elif not parsed.path or parsed.path == "/":
                     candidates.append(src_str + "/live")

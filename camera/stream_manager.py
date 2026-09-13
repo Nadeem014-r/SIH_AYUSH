@@ -304,13 +304,22 @@ class StreamManager:
         }
 
     def start_all(self) -> None:
-        for name, stream in self.streams.items():
+        def _start_one(name: str, stream: CameraStream) -> None:
             try:
                 stream.start()
             except Exception:
                 # start() already tolerates an unopenable camera; this guards
                 # against anything else so one camera can't stop the others.
                 log.exception("[%s] failed to start camera stream - continuing without it", name)
+
+        threads = [
+            threading.Thread(target=_start_one, args=(name, stream), daemon=True)
+            for name, stream in self.streams.items()
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         log.info(
             "Started %d camera stream(s): %s - health: %s",
             len(self.streams), list(self.streams), self.health(),

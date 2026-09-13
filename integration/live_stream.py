@@ -28,7 +28,7 @@ import time
 # and to FFmpeg's 30s stall timeout on a dropped stream. See app.py for the
 # measured UDP-vs-TCP numbers behind these values.
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;0|probesize;32768|analyzeduration;0|buffer_size;65536|reorder_queue_size;0"
+    "rtsp_transport;tcp|timeout;5000000|stimeout;5000000|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;0|probesize;32768|analyzeduration;0|buffer_size;65536|reorder_queue_size;0"
 )
 
 import cv2  # noqa: E402
@@ -62,6 +62,7 @@ class _LiveCamera:
         self._tracker = None
         self._thread = None
         self._stop_event = threading.Event()
+        self._start_lock = threading.Lock()
 
         self._cond = threading.Condition()
         self._latest_jpeg = None
@@ -75,11 +76,14 @@ class _LiveCamera:
     # -- lifecycle ---------------------------------------------------------
 
     def start(self):
-        from camera.stream_manager import CameraStream
+        with self._start_lock:
+            if self.running:
+                return
+            from camera.stream_manager import CameraStream
 
-        self._stream = CameraStream(
-            self.name, self._source, width=self._width, height=self._height
-        )
+            self._stream = CameraStream(
+                self.name, self._source, width=self._width, height=self._height
+            )
         # CameraSource.open() raises if the device is held elsewhere; translate
         # it here so the route can answer 409 instead of leaking a stacktrace.
         try:
@@ -258,17 +262,19 @@ class LiveCameraRegistry:
                     self._tracker_factory,
                 )
                 self._cameras[name] = cam
-            if not cam.running:
-                try:
-                    cam.start()
-                except CameraBusyError:
-                    # Drop it so the next attempt retries cleanly instead of
-                    # holding a permanently dead entry.
-                    self._cameras.pop(name, None)
-                    raise
             cam.viewers += 1
             cam.last_viewer_at = time.time()
-            return cam
+
+        if not cam.running:
+            try:
+                cam.start()
+            except CameraBusyError:
+                with self._lock:
+                    cam.viewers = max(0, cam.viewers - 1)
+                    if cam.viewers == 0:
+                        self._cameras.pop(name, None)
+                raise
+        return cam
 
     def release(self, name):
         with self._lock:
