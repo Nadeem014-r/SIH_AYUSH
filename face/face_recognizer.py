@@ -1,7 +1,19 @@
 import logging
 
 import numpy as np
-from insightface.app import FaceAnalysis
+
+try:
+    # The package itself may not be installed at all (not just missing its
+    # model cache) — e.g. a dev/CI machine without the ML stack, or a partial
+    # deployment. That used to be an uncaught ModuleNotFoundError out of this
+    # import, which crashed any caller transitively importing this module
+    # (including face/watchlist.py and its FastAPI routes) before __init__'s
+    # own try/except below ever got a chance to degrade gracefully. Kept as a
+    # module-level name (None, not omitted) so it stays patchable the same
+    # way tests already patch "face.face_recognizer.FaceAnalysis".
+    from insightface.app import FaceAnalysis
+except ImportError:
+    FaceAnalysis = None
 
 from config.providers import select_providers
 
@@ -50,6 +62,21 @@ class FaceRecognizer:
         # requirement, so a failure here degrades that feature only — same
         # pattern as alerts/alert_manager.py's audio fallback.
         self.available = True
+        if FaceAnalysis is None:
+            # The insightface package itself isn't installed — a different
+            # failure than a missing/uncached model, but the same graceful
+            # degradation applies: this feature is disabled, everything else
+            # (detection, tracking, zones, scoring, alerting, incident DB)
+            # runs unaffected.
+            self.available = False
+            self._app = None
+            log.warning(
+                "Face recognition unavailable (insightface is not installed) — "
+                "running without face recognition or watchlist matching; "
+                "everything else is unaffected. Install insightface (see "
+                "requirements.txt) to enable this."
+            )
+            return
         try:
             self._app = FaceAnalysis(
                 name="buffalo_s",

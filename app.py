@@ -150,7 +150,10 @@ def zone_group_count(detections: list) -> int:
     )
 
 
-def draw_threat_score_overlay(frame, det, scorer: ThreatScorer, dwell_seconds: float, group_count: int):
+def draw_threat_score_overlay(
+    frame, det, scorer: ThreatScorer, dwell_seconds: float, group_count: int,
+    zone=None, is_curfew=None,
+):
     score = scorer.score(
         zone_tier=det.zone_tier,
         hour=datetime.now().hour,
@@ -161,6 +164,8 @@ def draw_threat_score_overlay(frame, det, scorer: ThreatScorer, dwell_seconds: f
         group_count=group_count,
         watchlist_match=det.watchlist_match,
         watchlist_similarity=det.watchlist_similarity,
+        zone=zone,
+        is_curfew=is_curfew,
     )
     return score
 
@@ -371,11 +376,15 @@ def main() -> None:
                 zone_result = zone_engines[name].classify(ground_point, det.direction)
             det.zone_tier = zone_result["tier"]
             det.zone_direction = zone_result["direction"]
+            det.zone_id = zone_result.get("zone_id")
+            det.zone_label = zone_result.get("zone_label")
+            det._matched_zone = zone_result.get("zone")
 
         draw_detections(processed, detections)
 
         group_count = zone_group_count(detections)
         scores = []
+        curfew_active = zone_engines[name]._is_curfew()
         for det in detections:
             # Dwell is keyed on the Re-ID person_id where we have one,
             # so standing still behind cover — which makes ByteTrack
@@ -387,7 +396,9 @@ def main() -> None:
             dwell = loiter_trackers[name].update(dwell_key, det.zone_tier)
             scores.append(
                 draw_threat_score_overlay(
-                    processed, det, threat_scorer, dwell, group_count
+                    processed, det, threat_scorer, dwell, group_count,
+                    zone=getattr(det, "_matched_zone", None),
+                    is_curfew=curfew_active,
                 )
             )
 

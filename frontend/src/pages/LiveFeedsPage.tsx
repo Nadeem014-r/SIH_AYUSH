@@ -33,19 +33,19 @@ export const LiveFeedsPage: React.FC = () => {
       apiCameras.length > 0
         ? apiCameras
         : [
-            {
-              id: 'cam0',
-              name: 'cam0',
-              location: 'Border Area Camera 0',
-              sector: 'North Border Sector',
-              tier: 'red',
-              isActive: true,
-              fps: '30.0',
-              activity: 'MOTION',
-              health: 'online',
-              source: 'pipeline',
-            } as ApiCamera,
-          ];
+          {
+            id: 'cam0',
+            name: 'cam0',
+            location: 'Border Area Camera 0',
+            sector: 'North Border Sector',
+            tier: 'red',
+            isActive: true,
+            fps: '30.0',
+            activity: 'MOTION',
+            health: 'online',
+            source: 'pipeline',
+          } as ApiCamera,
+        ];
     return list.map((c) => ({
       ...c,
       streamUrl: cameraStreamUrl(c.id),
@@ -196,8 +196,7 @@ export const LiveFeedsPage: React.FC = () => {
     } catch (err) {
       setIsSubmitting(false);
       setFormError(
-        `Failed to integrate camera with backend: ${
-          err instanceof Error ? err.message : 'unknown error'
+        `Failed to integrate camera with backend: ${err instanceof Error ? err.message : 'unknown error'
         }`
       );
     }
@@ -212,11 +211,10 @@ export const LiveFeedsPage: React.FC = () => {
 
   const renderCameraGrid = (cameraList: CameraItem[]) => (
     <div
-      className={`grid gap-4 ${
-        gridColumns === '3'
+      className={`grid gap-4 ${gridColumns === '3'
           ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
           : 'grid-cols-1 md:grid-cols-2'
-      }`}
+        }`}
     >
       {cameraList.map((camera) => (
         <div
@@ -291,43 +289,39 @@ export const LiveFeedsPage: React.FC = () => {
           <div className="flex items-center gap-1.5 p-1 bg-black/60 border border-white/10 rounded-xl">
             <button
               onClick={() => setSelectedTierFilter('all')}
-              className={`px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${
-                selectedTierFilter === 'all'
+              className={`px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${selectedTierFilter === 'all'
                   ? 'bg-white/15 text-white shadow-sm'
                   : 'text-text-dim hover:text-white'
-              }`}
+                }`}
             >
               ALL ({cameras.length})
             </button>
             <button
               onClick={() => setSelectedTierFilter('red')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${
-                selectedTierFilter === 'red'
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${selectedTierFilter === 'red'
                   ? 'bg-accent-red/25 text-accent-red border border-accent-red/40 shadow-sm'
                   : 'text-text-dim hover:text-accent-red'
-              }`}
+                }`}
             >
               <span className="w-2 h-2 rounded-full bg-accent-red animate-pulse" />
               RED ({redCameras.length})
             </button>
             <button
               onClick={() => setSelectedTierFilter('yellow')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${
-                selectedTierFilter === 'yellow'
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${selectedTierFilter === 'yellow'
                   ? 'bg-accent-yellow/25 text-accent-yellow border border-accent-yellow/40 shadow-sm'
                   : 'text-text-dim hover:text-accent-yellow'
-              }`}
+                }`}
             >
               <span className="w-2 h-2 rounded-full bg-accent-yellow" />
               YELLOW ({yellowCameras.length})
             </button>
             <button
               onClick={() => setSelectedTierFilter('green')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${
-                selectedTierFilter === 'green'
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium rounded-lg transition-all ${selectedTierFilter === 'green'
                   ? 'bg-accent-green/25 text-accent-green border border-accent-green/40 shadow-sm'
                   : 'text-text-dim hover:text-accent-green'
-              }`}
+                }`}
             >
               <span className="w-2 h-2 rounded-full bg-accent-green" />
               GREEN ({greenCameras.length})
@@ -361,21 +355,19 @@ export const LiveFeedsPage: React.FC = () => {
             <div className="hidden sm:inline-flex p-1 bg-black/60 border border-white/10 rounded-xl shadow-inner">
               <button
                 onClick={() => setGridColumns('2')}
-                className={`px-2.5 py-1 text-[11px] font-mono rounded-lg transition-all ${
-                  gridColumns === '2'
+                className={`px-2.5 py-1 text-[11px] font-mono rounded-lg transition-all ${gridColumns === '2'
                     ? 'bg-accent-teal/15 text-accent-teal font-bold border border-accent-teal/40'
                     : 'text-text-dim hover:text-white'
-                }`}
+                  }`}
               >
                 2 COL
               </button>
               <button
                 onClick={() => setGridColumns('3')}
-                className={`px-2.5 py-1 text-[11px] font-mono rounded-lg transition-all ${
-                  gridColumns === '3'
+                className={`px-2.5 py-1 text-[11px] font-mono rounded-lg transition-all ${gridColumns === '3'
                     ? 'bg-accent-teal/15 text-accent-teal font-bold border border-accent-teal/40'
                     : 'text-text-dim hover:text-white'
-                }`}
+                  }`}
               >
                 3 COL
               </button>
@@ -385,11 +377,10 @@ export const LiveFeedsPage: React.FC = () => {
           <div className="inline-flex p-1 bg-black/60 border border-white/10 rounded-xl shadow-inner">
             <button
               onClick={() => setViewMode('grid')}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-semibold rounded-lg transition-all ${
-                viewMode === 'grid'
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-semibold rounded-lg transition-all ${viewMode === 'grid'
                   ? 'bg-accent-teal/15 text-accent-teal border border-accent-teal/40'
                   : 'text-text-dim hover:text-white'
-              }`}
+                }`}
             >
               <Grid2X2 className="w-3.5 h-3.5" />
               <span>GRID</span>
@@ -397,11 +388,10 @@ export const LiveFeedsPage: React.FC = () => {
 
             <button
               onClick={() => setViewMode('focus')}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-semibold rounded-lg transition-all ${
-                viewMode === 'focus'
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-semibold rounded-lg transition-all ${viewMode === 'focus'
                   ? 'bg-accent-teal/15 text-accent-teal border border-accent-teal/40'
                   : 'text-text-dim hover:text-white'
-              }`}
+                }`}
             >
               <Maximize2 className="w-3.5 h-3.5" />
               <span>FOCUS</span>
@@ -454,20 +444,18 @@ export const LiveFeedsPage: React.FC = () => {
               <button
                 key={cam.id}
                 onClick={() => setFocusedCameraId(cam.id)}
-                className={`px-3 py-1 text-xs font-mono rounded-sm transition-all flex items-center gap-2 border shrink-0 ${
-                  focusedCameraId === cam.id
+                className={`px-3 py-1 text-xs font-mono rounded-sm transition-all flex items-center gap-2 border shrink-0 ${focusedCameraId === cam.id
                     ? 'bg-accent-teal/20 text-accent-teal border-accent-teal/50 font-semibold shadow-sm'
                     : 'bg-bg-surface text-text-dim border-border-subtle hover:text-text-primary hover:bg-bg-elevated'
-                }`}
+                  }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full ${
-                    cam.tier === 'red'
+                  className={`w-2 h-2 rounded-full ${cam.tier === 'red'
                       ? 'bg-accent-red'
                       : cam.tier === 'yellow'
-                      ? 'bg-accent-yellow'
-                      : 'bg-accent-green'
-                  }`}
+                        ? 'bg-accent-yellow'
+                        : 'bg-accent-green'
+                    }`}
                 />
                 <span>{cam.name}</span>
                 <span className="text-[10px] text-text-muted hidden sm:inline">
@@ -689,11 +677,10 @@ export const LiveFeedsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setNewCamTier('red')}
-                className={`p-3 rounded-xl border text-left transition-all ${
-                  newCamTier === 'red'
+                className={`p-3 rounded-xl border text-left transition-all ${newCamTier === 'red'
                     ? 'bg-accent-red/20 border-accent-red shadow-[0_0_15px_rgba(239,68,68,0.25)] ring-1 ring-accent-red'
                     : 'bg-bg-elevated border-white/10 hover:border-accent-red/40'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-1.5 text-accent-red font-bold font-mono text-xs mb-1">
                   <ShieldAlert className="w-3.5 h-3.5" />
@@ -708,11 +695,10 @@ export const LiveFeedsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setNewCamTier('yellow')}
-                className={`p-3 rounded-xl border text-left transition-all ${
-                  newCamTier === 'yellow'
+                className={`p-3 rounded-xl border text-left transition-all ${newCamTier === 'yellow'
                     ? 'bg-accent-yellow/20 border-accent-yellow shadow-[0_0_15px_rgba(234,179,8,0.25)] ring-1 ring-accent-yellow'
                     : 'bg-bg-elevated border-white/10 hover:border-accent-yellow/40'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-1.5 text-accent-yellow font-bold font-mono text-xs mb-1">
                   <Shield className="w-3.5 h-3.5" />
@@ -727,11 +713,10 @@ export const LiveFeedsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setNewCamTier('green')}
-                className={`p-3 rounded-xl border text-left transition-all ${
-                  newCamTier === 'green'
+                className={`p-3 rounded-xl border text-left transition-all ${newCamTier === 'green'
                     ? 'bg-accent-green/20 border-accent-green shadow-[0_0_15px_rgba(34,197,94,0.25)] ring-1 ring-accent-green'
                     : 'bg-bg-elevated border-white/10 hover:border-accent-green/40'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-1.5 text-accent-green font-bold font-mono text-xs mb-1">
                   <ShieldCheck className="w-3.5 h-3.5" />

@@ -9,6 +9,7 @@ class ThreatScore:
         "sector_risk", "time_risk", "kinematics_risk", "class_confidence",
         "direction_risk", "loiter_risk", "group_risk", "total", "tier",
         "override_reason", "tier_ceiling", "ceiling_reason",
+        "rule_name", "zone_id", "zone_label", "rule_evidence", "immediate",
     )
 
     # A breach of the border line is a priority event whatever the clock says.
@@ -33,6 +34,12 @@ class ThreatScore:
         override_reason: "str | None" = None,
         tier_ceiling: "str | None" = None,
         ceiling_reason: "str | None" = None,
+        rule_name: "str | None" = None,
+        zone_id: "str | None" = None,
+        zone_label: "str | None" = None,
+        rule_evidence: "str | None" = None,
+        immediate: bool = False,
+        score_floor: float = 0.0,
     ):
         self.sector_risk = sector_risk
         self.time_risk = time_risk
@@ -41,11 +48,20 @@ class ThreatScore:
         self.direction_risk = direction_risk
         self.loiter_risk = loiter_risk
         self.group_risk = group_risk
-        self.total = min(
-            100.0,
+        self.rule_name = rule_name
+        self.zone_id = zone_id
+        self.zone_label = zone_label
+        self.rule_evidence = rule_evidence
+        self.immediate = immediate
+
+        computed = (
             sector_risk + time_risk + kinematics_risk + class_confidence
-            + direction_risk + loiter_risk + group_risk,
+            + direction_risk + loiter_risk + group_risk
         )
+        if score_floor > 0:
+            computed = max(computed, score_floor)
+        self.total = min(100.0, computed)
+
         if self.total <= GREEN_MAX:
             self.tier = "green"
         elif self.total <= YELLOW_MAX:
@@ -84,6 +100,8 @@ class ThreatScore:
         summary = " + ".join(f"{n} {v:.0f}" for n, v in parts if v > 0) or "none"
         if self.override_reason is not None:
             summary += f"  [forced RED: {self.override_reason}]"
+        elif self.rule_name is not None:
+            summary += f"  [rule: {self.rule_name}]"
         if self.ceiling_reason is not None and self.tier_ceiling is not None:
             summary += f"  [capped at {self.tier_ceiling.upper()}: {self.ceiling_reason}]"
         return summary
@@ -91,6 +109,8 @@ class ThreatScore:
     def reasons(self) -> list[str]:
         """Human-readable reasons explaining why this entity is suspicious or safe."""
         items = []
+        if self.rule_name and self.rule_evidence:
+            items.append(f"Zone Rule '{self.rule_name}': {self.rule_evidence}")
         if self.override_reason:
             items.append(f"Override Alert: {self.override_reason}")
         if self.sector_risk >= 20:
@@ -165,6 +185,9 @@ class ThreatScorer:
         group_count: int = 1,
         watchlist_match: "str | None" = None,
         watchlist_similarity: "float | None" = None,
+        zone: "Any | None" = None,
+        is_curfew: "bool | None" = None,
+        policy_match: "Any | None" = None,
     ) -> ThreatScore:
         sector_risk = self.rules.get_sector_risk(zone_tier or "none")
         time_risk = self.rules.get_time_risk(hour)
@@ -185,12 +208,48 @@ class ThreatScorer:
             self.rules.get_group_risk(group_count) if in_zone and is_person else 0.0
         )
 
-        # A watchlist hit outranks a crossing: it names *who* this is, not just
-        # what they did. Both are reported the same way so the log states the
-        # cause either way.
-        override_reason = self._watchlist_override(
+        watchlist_override = self._watchlist_override(
             watchlist_match, watchlist_similarity
-        ) or self._crossing_override(zone_tier, zone_direction, category)
+        )
+        crossing_override = self._crossing_override(zone_tier, zone_direction, category)
+        override_reason = watchlist_override or crossing_override
+
+        # Evaluate configurable zone policy if present
+        rule_name = None
+        zone_id = getattr(zone, "id", None) if zone else None
+        zone_label = getattr(zone, "label", None) if zone else None
+        rule_evidence = None
+        immediate = False
+        score_floor = 0.0
+
+        if policy_match is None and zone is not None:
+            from zones.zone_policy import evaluate_zone_policy
+            import types
+
+            det_proxy = types.SimpleNamespace(
+                category=lambda: category,
+                class_name=category,
+                speed=speed_px_per_frame,
+                zone_direction=zone_direction,
+                direction=None,
+            )
+            policy_match = evaluate_zone_policy(
+                zone=zone,
+                det=det_proxy,
+                dwell_seconds=dwell_seconds,
+                hour=hour,
+                is_curfew=is_curfew,
+                threat_score=types.SimpleNamespace(kinematics_risk=kinematics_risk),
+            )
+
+        if policy_match is not None and policy_match.matched:
+            rule_name = policy_match.rule_name
+            rule_evidence = policy_match.reason
+            immediate = policy_match.immediate
+            score_floor = getattr(policy_match, "score_floor", 0.0)
+
+            if policy_match.tier == "red":
+                override_reason = watchlist_override or policy_match.reason
 
         return ThreatScore(
             sector_risk, time_risk, kinematics_risk, class_confidence,
@@ -198,6 +257,12 @@ class ThreatScorer:
             override_reason=override_reason,
             tier_ceiling=None if in_zone else self.NO_ZONE_CEILING,
             ceiling_reason=None if in_zone else "no zone defined for this camera",
+            rule_name=rule_name,
+            zone_id=zone_id,
+            zone_label=zone_label,
+            rule_evidence=rule_evidence,
+            immediate=immediate,
+            score_floor=score_floor,
         )
 
     # Animals are deliberately exempt: livestock and strays cross a border line

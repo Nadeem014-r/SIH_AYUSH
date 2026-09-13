@@ -249,10 +249,15 @@ class LiveCameraRegistry:
             raise KeyError(name)
         with self._lock:
             cam = self._cameras.get(name)
+            target_source = sources[name]
+            if cam is not None and cam._source != target_source:
+                cam.stop()
+                self._cameras.pop(name, None)
+                cam = None
             if cam is None:
                 cam = _LiveCamera(
                     name,
-                    sources[name],
+                    target_source,
                     self._width,
                     self._height,
                     self._tracker_factory,
@@ -289,8 +294,8 @@ class LiveCameraRegistry:
         """Stop now regardless of viewer count. Their generators unblock via
         the notify_all in _LiveCamera.stop() and end their responses."""
         with self._lock:
-            cam = self._cameras.get(name)
-            if cam is not None and cam.running:
+            cam = self._cameras.pop(name, None)
+            if cam is not None:
                 cam.viewers = 0
                 cam.stop()
 

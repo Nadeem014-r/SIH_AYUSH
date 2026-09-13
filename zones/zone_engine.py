@@ -12,25 +12,62 @@ ZONE_PRIORITY = {"red": 3, "yellow": 2, "green": 1}
 
 
 class Zone:
-    def __init__(self, zone_type: str, polygon: list):
+    def __init__(
+        self,
+        zone_type: str,
+        polygon: list,
+        id: "str | None" = None,
+        label: "str | None" = None,
+        direction: "str | None" = None,
+        policy: "dict | Any | None" = None,
+        **extra,
+    ):
         self.zone_type = zone_type  # "red" | "yellow" | "green"
         self.polygon = polygon  # list of (x, y) pixel points
+        self.id = id
+        self.label = label
+        self.direction = direction
+        self.policy = policy
+        self.extra = extra
+        for k, v in extra.items():
+            setattr(self, k, v)
 
     def contains(self, point: tuple) -> bool:
+        if not self.polygon:
+            return False
         contour = np.array(self.polygon, dtype=np.int32)
         return cv2.pointPolygonTest(contour, point, False) >= 0
 
     def centroid(self) -> tuple:
+        if not self.polygon:
+            return (0.0, 0.0)
         xs = [p[0] for p in self.polygon]
         ys = [p[1] for p in self.polygon]
         return (sum(xs) / len(xs), sum(ys) / len(ys))
 
     def to_dict(self) -> dict:
-        return {"zone_type": self.zone_type, "polygon": self.polygon}
+        d = {"zone_type": self.zone_type, "polygon": self.polygon}
+        if self.id is not None:
+            d["id"] = self.id
+        if self.label is not None:
+            d["label"] = self.label
+        if self.direction is not None:
+            d["direction"] = self.direction
+        if self.policy is not None:
+            d["policy"] = self.policy.to_dict() if hasattr(self.policy, "to_dict") else self.policy
+        d.update(self.extra)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "Zone":
-        return cls(data["zone_type"], [tuple(p) for p in data["polygon"]])
+        data_copy = dict(data)
+        zone_type = data_copy.pop("zone_type")
+        polygon = [tuple(p) for p in data_copy.pop("polygon", [])]
+        id_ = data_copy.pop("id", None)
+        label = data_copy.pop("label", None)
+        direction = data_copy.pop("direction", None)
+        policy = data_copy.pop("policy", None)
+        return cls(zone_type, polygon, id=id_, label=label, direction=direction, policy=policy, **data_copy)
 
 
 class ZoneEngine:
@@ -102,11 +139,21 @@ class ZoneEngine:
             direction_label = self._direction_label_fixed(direction)
             if tier == "green" and self._is_curfew():
                 tier = "yellow"
-            return {"tier": tier, "direction": direction_label}
+            fixed_zone = getattr(self, "_fixed_zone", None)
+            if fixed_zone is None or fixed_zone.zone_type != tier:
+                fixed_zone = Zone(tier, [], label=f"Fixed {tier.upper()} Camera Tier")
+                self._fixed_zone = fixed_zone
+            return {
+                "tier": tier,
+                "direction": direction_label,
+                "zone": fixed_zone,
+                "zone_id": None,
+                "zone_label": fixed_zone.label,
+            }
 
         matches = [z for z in self.zones if z.contains(ground_point)]
         if not matches:
-            return {"tier": "none", "direction": None}
+            return {"tier": "none", "direction": None, "zone": None, "zone_id": None, "zone_label": None}
 
         best = max(matches, key=lambda z: ZONE_PRIORITY[z.zone_type])
         tier = best.zone_type
@@ -115,7 +162,47 @@ class ZoneEngine:
         if tier == "green" and self._is_curfew():
             tier = "yellow"  # curfew re-tiering
 
-        return {"tier": tier, "direction": direction_label}
+        return {
+            "tier": tier,
+            "direction": direction_label,
+            "zone": best,
+            "zone_id": getattr(best, "id", None),
+            "zone_label": getattr(best, "label", None),
+        }
+
+    def evaluate_policy(
+        self,
+        det,
+        dwell_seconds: float = 0.0,
+        hour: "int | None" = None,
+        is_curfew: "bool | None" = None,
+        threat_score=None,
+        zone: "Zone | None" = None,
+    ):
+        """Evaluates zone policy rules against a detection."""
+        if zone is None:
+            box = getattr(det, "box", None)
+            if box is not None:
+                x1, y1, x2, y2 = box
+                ground_point = ((x1 + x2) // 2, y2)
+                cls_res = self.classify(ground_point, getattr(det, "direction", None))
+                zone = cls_res.get("zone")
+        if zone is None:
+            return None
+        from zones.zone_policy import evaluate_zone_policy
+
+        if is_curfew is None:
+            is_curfew = self._is_curfew()
+        if hour is None:
+            hour = self._now_fn().hour
+        return evaluate_zone_policy(
+            zone=zone,
+            det=det,
+            dwell_seconds=dwell_seconds,
+            hour=hour,
+            is_curfew=is_curfew,
+            threat_score=threat_score,
+        )
 
     # A track's direction vector is a displacement summed over the recent
     # history window, so it is never exactly zero — camera shake and box jitter

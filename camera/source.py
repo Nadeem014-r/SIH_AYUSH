@@ -1,13 +1,13 @@
 import logging
 import os
 import re
-
 import socket
 import urllib.parse
 
-# Must be set BEFORE cv2 is imported so OpenCV's FFmpeg backend uses TCP and zero buffering.
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|framedrop;1|max_delay;0|probesize;32768|analyzeduration;0|buffer_size;65536|reorder_queue_size;0"
+# Must be set BEFORE cv2 is imported so OpenCV's FFmpeg backend uses TCP/UDP and fast timeouts.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp;udp|timeout;3000000|stimeout;3000000|max_delay;500000",
 )
 
 import cv2
@@ -24,6 +24,57 @@ def redact_source(source) -> str:
     """A log-safe rendering of a camera source, with any embedded
     `user:password@` credentials masked out."""
     return _URL_CREDENTIALS.sub("//***:***@", str(source))
+
+
+def resolve_camera_source(src_str: str) -> str:
+    """If user enters the dummy cellular IP shown on Android RTSP apps (e.g. 192.0.0.2),
+    automatically resolve it to the reachable gateway or LAN device IP."""
+    if not isinstance(src_str, str):
+        return src_str
+    try:
+        parsed = urllib.parse.urlparse(src_str)
+        host = parsed.hostname
+        port = parsed.port or (554 if "rtsp" in parsed.scheme.lower() else 80)
+        clean_path = parsed.path in ("", "/")
+        if host and (host.startswith("192.0.0.") or host == "0.0.0.0"):
+            import subprocess
+
+            gw = None
+            try:
+                gw_out = subprocess.check_output("route print 0.0.0.0", text=True)
+                m = re.search(r"0\.0\.0\.0\s+0\.0\.0\.0\s+([\d.]+)", gw_out)
+                gw = m.group(1) if m else None
+                if gw:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(0.6)
+                        if s.connect_ex((gw, port)) == 0:
+                            log.info("Auto-mapped mobile cellular IP %s -> %s on port %d", host, gw, port)
+                            res = src_str.replace(host, gw)
+                            return res.rstrip("/") if clean_path else res
+            except Exception:
+                pass
+
+            try:
+                arp_out = subprocess.check_output("arp -a", text=True)
+                for ip in re.findall(r"(\d+\.\d+\.\d+\.\d+)", arp_out):
+                    if not ip.endswith(".255") and not ip.startswith(("224.", "239.", "127.")):
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            s.settimeout(0.3)
+                            if s.connect_ex((ip, port)) == 0:
+                                log.info("Auto-mapped mobile cellular IP %s -> %s on port %d", host, ip, port)
+                                res = src_str.replace(host, ip)
+                                return res.rstrip("/") if clean_path else res
+            except Exception:
+                pass
+
+            if gw:
+                res = src_str.replace(host, gw)
+                return res.rstrip("/") if clean_path else res
+        if clean_path:
+            return src_str.rstrip("/")
+    except Exception:
+        pass
+    return src_str
 
 
 class CameraSource:
@@ -60,7 +111,8 @@ class CameraSource:
         if isinstance(src, int):
             cap = cv2.VideoCapture(src)
         else:
-            src_str = str(src).strip()
+            src_str = resolve_camera_source(str(src).strip())
+            self.source = src_str
             if src_str.lower().startswith(("rtsp://", "rtsps://", "http://", "https://")):
                 try:
                     parsed = urllib.parse.urlparse(src_str)
@@ -68,7 +120,7 @@ class CameraSource:
                     port = parsed.port or (554 if "rtsp" in parsed.scheme.lower() else 80)
                     if host:
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.settimeout(2.5)
+                            s.settimeout(0.6)
                             if s.connect_ex((host, port)) != 0:
                                 raise RuntimeError(f"Network destination unreachable: {host}:{port}")
                 except Exception as e:

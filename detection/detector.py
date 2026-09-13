@@ -1,6 +1,9 @@
 import logging
 
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
 
 log = logging.getLogger("ibvap.detection")
 
@@ -26,6 +29,9 @@ class Detection:
         "watchlist_match",
         "watchlist_similarity",
         "camera_name",
+        "zone_id",
+        "zone_label",
+        "_matched_zone",
     )
 
     def __init__(self, class_id: int, class_name: str, confidence: float, box: tuple):
@@ -45,6 +51,9 @@ class Detection:
         # only place that knows; the incident store persists it so an alert
         # can be traced back to a location. None outside the live pipeline.
         self.camera_name: str | None = None
+        self.zone_id: str | None = None
+        self.zone_label: str | None = None
+        self._matched_zone = None
 
     def category(self) -> str:
         if self.class_id in PERSON_CLASS_IDS:
@@ -73,6 +82,8 @@ class Detector:
     """Wraps a YOLOv8 model, filtered down to person/vehicle/animal classes."""
 
     def __init__(self, model_path: str = "models/yolov8n.onnx", confidence: float = 0.4):
+        if YOLO is None:
+            raise ImportError("ultralytics is required to run YOLO detector")
         log.info("Loading YOLO model: %s", model_path)
         self._model = YOLO(model_path, task="detect")
         self.confidence = confidence

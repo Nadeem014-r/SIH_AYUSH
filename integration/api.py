@@ -247,6 +247,11 @@ def _breakdown(row: dict) -> dict:
         "overrideReason": raw.get("override_reason"),
         "tierCeiling": raw.get("tier_ceiling"),
         "ceilingReason": raw.get("ceiling_reason"),
+        "ruleName": raw.get("rule_name"),
+        "zoneId": raw.get("zone_id"),
+        "zoneLabel": raw.get("zone_label"),
+        "ruleEvidence": raw.get("rule_evidence"),
+        "immediate": raw.get("immediate", False),
         "recorded": True,
     }
 
@@ -547,6 +552,9 @@ def v1_add_camera(camera: dict = Body(...), _: None = Depends(require_token)) ->
     # A bare digit is a local device index; anything else is a URL. int() here
     # matters — cv2.VideoCapture("0") opens a *file* named "0", not webcam 0.
     raw_str = str(raw).strip()
+    from camera.source import resolve_camera_source
+    if not raw_str.isdigit() and raw_str:
+        raw_str = resolve_camera_source(raw_str)
     source = int(raw_str) if raw_str.isdigit() else (raw_str or None)
     tier = str(camera.get("tier") or "red").lower()
     if tier not in ("red", "yellow", "green"):
@@ -754,6 +762,7 @@ def v1_zones(_: None = Depends(require_token)) -> dict:
                 "tripwireEnabled": z.get("tripwireEnabled", False),
                 "loiteringThresholdSeconds": z.get("loiteringThresholdSeconds"),
                 "climbingDetection": z.get("climbingDetection", False),
+                "policy": z.get("policy"),
             }
             for i, z in enumerate(entries)
         ]
@@ -764,11 +773,8 @@ def v1_zones(_: None = Depends(require_token)) -> dict:
 def v1_save_zones(zones: dict = Body(...), _: None = Depends(require_token)) -> dict:
     """Writes config/zones_<cam>.json in the shape ZoneEngine.load() reads.
 
-    zone_type and polygon are the only keys the engine consumes; the extra
-    dashboard fields ride along in the same objects and are ignored by it.
-    Note the desktop ZoneDrawer ('z' in app.py) writes via Zone.to_dict(),
-    which emits only those two keys — so re-drawing a zone there drops the
-    dashboard's label and tripwire flags for that camera.
+    zone_type and polygon are the primary keys the engine consumes; the extra
+    dashboard fields and configurable policy ride along in the same objects.
     """
     written = {}
     for cam_id, cam_zones in zones.items():
@@ -792,6 +798,7 @@ def v1_save_zones(zones: dict = Body(...), _: None = Depends(require_token)) -> 
                     "tripwireEnabled": z.get("tripwireEnabled", False),
                     "loiteringThresholdSeconds": z.get("loiteringThresholdSeconds"),
                     "climbingDetection": z.get("climbingDetection", False),
+                    "policy": z.get("policy"),
                 }
             )
         path = _zones_path(cam_id)
@@ -799,9 +806,66 @@ def v1_save_zones(zones: dict = Body(...), _: None = Depends(require_token)) -> 
         with open(path, "w") as f:
             json.dump(payload, f, indent=2)
         written[cam_id] = payload
-    # A running app.py loaded its zones at startup and will not see this until
-    # it is restarted — the file is the handoff, not a live channel.
     return v1_zones()
+
+
+@v1.get("/zones/{camera_id}/policy")
+def v1_get_zone_policy(camera_id: str, _: None = Depends(require_token)) -> dict:
+    """Returns the policy configuration for all zones on a camera."""
+    if camera_id not in _camera_sources():
+        raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
+    path = _zones_path(camera_id)
+    if not os.path.exists(path):
+        return {"cameraId": camera_id, "zones": []}
+    with open(path) as f:
+        zones = json.load(f)
+    return {
+        "cameraId": camera_id,
+        "zones": [
+            {
+                "id": z.get("id", f"zone-{camera_id}-{i}"),
+                "label": z.get("label", ""),
+                "tier": z.get("zone_type", "green"),
+                "policy": z.get("policy"),
+                "loiteringThresholdSeconds": z.get("loiteringThresholdSeconds"),
+            }
+            for i, z in enumerate(zones)
+        ],
+    }
+
+
+@v1.put("/zones/{camera_id}/policy")
+def v1_update_zone_policy(
+    camera_id: str,
+    policy_update: dict = Body(...),
+    _: None = Depends(require_token),
+) -> dict:
+    """Configures rules/policies for zones on a camera."""
+    if camera_id not in _camera_sources():
+        raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
+    path = _zones_path(camera_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"No zones configured for camera {camera_id}")
+    with open(path) as f:
+        zones = json.load(f)
+
+    zone_policies = policy_update.get("zones", policy_update)
+    updated_count = 0
+    for i, z in enumerate(zones):
+        zid = z.get("id", f"zone-{camera_id}-{i}")
+        if zid in zone_policies:
+            z["policy"] = zone_policies[zid]
+            updated_count += 1
+        elif str(i) in zone_policies:
+            z["policy"] = zone_policies[str(i)]
+            updated_count += 1
+        elif "policy" in policy_update:
+            z["policy"] = policy_update["policy"]
+            updated_count += 1
+
+    with open(path, "w") as f:
+        json.dump(zones, f, indent=2)
+    return {"status": "ok", "cameraId": camera_id, "updatedCount": updated_count}
 
 
 # --------------------------------------------------------------------------
@@ -922,8 +986,22 @@ def v1_enroll(person: dict = Body(...), _: None = Depends(require_token)) -> dic
     if frame is None:
         raise HTTPException(status_code=422, detail="Image could not be decoded.")
 
+    recognizer = _get_recognizer()
+    if not recognizer.available:
+        # Distinct from "no face found" (422): the photo was never looked at
+        # because face recognition itself is disabled on this server (no
+        # insightface package/model available) — see FaceRecognizer.__init__.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Face recognition is unavailable on this server (insightface "
+                "model/package not available) — watchlist enrollment cannot "
+                "verify a face right now."
+            ),
+        )
+
     h, w = frame.shape[:2]
-    _, embedding = _get_recognizer().embed(frame, (0, 0, w, h))
+    _, embedding = recognizer.embed(frame, (0, 0, w, h))
     if embedding is None:
         raise HTTPException(
             status_code=422,

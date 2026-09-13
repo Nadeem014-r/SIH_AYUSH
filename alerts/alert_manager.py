@@ -137,7 +137,9 @@ class AlertManager:
         self._last_seen[track_key] = now
         self._purge_stale(now)
         prev_tier = self._last_tier.get(track_key, "green")
-        tier = self._confirmed_tier(track_key, score.tier)
+        tier = self._confirmed_tier(
+            track_key, score.tier, immediate=bool(getattr(score, "immediate", False))
+        )
 
         if tier == "green":
             log.debug(
@@ -277,13 +279,21 @@ class AlertManager:
         if stale:
             log.debug("Evicted alert state for %d stale identit(ies)", len(stale))
 
-    def _confirmed_tier(self, track_key, observed_tier: str) -> str:
+    def _confirmed_tier(self, track_key, observed_tier: str, immediate: bool = False) -> str:
         """N-of-M confirmation on the way up, full-window hysteresis on the way
         down. Returns the tier the alerting logic should act on, which is not
         necessarily the tier this single frame scored."""
         history = self._history.setdefault(
             track_key, deque(maxlen=self.confirm_window)
         )
+        if immediate and observed_tier == "red":
+            # Immediate CRITICAL alert: seed confirmation history directly so
+            # this urgent event confirms without delay while still using AlertManager
+            # for rate limiting, backoff, and logging.
+            history.extend(["red"] * self.confirm_n)
+            self._last_tier[track_key] = "red"
+            return "red"
+
         history.append(observed_tier)
         confirmed = self._last_tier.get(track_key, "green")
 
@@ -340,6 +350,9 @@ class AlertManager:
         so this platform can feed whatever C2/SIEM system a deploying force
         already runs, without it needing to know this platform's internals.
         """
+        rule_name = getattr(score, "rule_name", None)
+        override_reason = getattr(score, "override_reason", None)
+        rule_evidence = getattr(score, "rule_evidence", None)
         payload = {
             "track_id": det.track_id,
             "person_id": det.person_id,
@@ -349,12 +362,20 @@ class AlertManager:
             "score": score.total,
             "timestamp": now,
         }
+        if rule_name:
+            payload["rule_name"] = rule_name
+        if override_reason:
+            payload["override_reason"] = override_reason
+        if rule_evidence:
+            payload["rule_evidence"] = rule_evidence
+
         if self.webhook is not None:
             self.webhook.notify(payload)
         if self.syslog is not None:
+            rule_str = f" rule={rule_name}" if rule_name else ""
             self.syslog.emit(
                 f"ALERT tier={score.tier} category={det.category()} "
-                f"score={score.total:.0f} track={track_key} zone={det.zone_tier}"
+                f"score={score.total:.0f} track={track_key} zone={det.zone_tier}{rule_str}"
             )
 
     def _record_evidence(self, det, score, frames: list) -> None:
